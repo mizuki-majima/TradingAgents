@@ -25,6 +25,7 @@ from tradingagents.dataflows.config import set_config
 from tradingagents.dataflows.date_window import coverage_gap
 from tradingagents.dataflows.fred import _resolve_series_id
 from tradingagents.dataflows.symbol_utils import normalize_symbol
+from tradingagents.portfolio import PortfolioContext
 
 
 @pytest.mark.unit
@@ -243,3 +244,49 @@ class JapanContextTests(unittest.TestCase):
 
     def test_a_percentage_is_still_refused(self):
         self.assertIsNone(_coerce_optional_float("15%"))
+
+
+@pytest.mark.unit
+class PortfolioSymbolMatchingTests(unittest.TestCase):
+    """A book and a run may spell one instrument differently.
+
+    Found in a live run: with ``default_exchange_suffix=".T"`` set, analysing
+    ``7203`` against a book holding ``7203.T`` rendered "No current position in
+    7203" and then listed the same 500 units under "Other positions". The
+    Portfolio Manager read that as an inconsistency and told the desk to verify
+    the balance before executing — correct of it, and a fault of ours.
+    """
+
+    def setUp(self):
+        self.book = PortfolioContext.model_validate({
+            "cash": 5_000_000.0, "currency": "JPY",
+            "positions": [
+                {"ticker": "7203.T", "quantity": 500, "average_price": 2850.0},
+                {"ticker": "6758.T", "quantity": 100},
+            ],
+        })
+
+    def test_a_bare_code_finds_the_suffixed_holding(self):
+        set_config({"default_exchange_suffix": ".T"})
+        held = self.book.position_in("7203")
+        self.assertIsNotNone(held)
+        self.assertEqual(held.quantity, 500)
+
+    def test_a_vendor_spelling_finds_the_same_holding(self):
+        self.assertEqual(self.book.position_in("7203.TYO").quantity, 500)
+
+    def test_the_matched_position_is_not_also_listed_as_another(self):
+        set_config({"default_exchange_suffix": ".T"})
+        rendered = self.book.render("7203")
+        self.assertIn("Current position in 7203.T: 500", rendered)
+        self.assertNotIn("No current position", rendered)
+        self.assertNotIn("7203.T 500", rendered.split("Other positions:")[-1])
+
+    def test_a_genuinely_absent_name_still_reads_as_absent(self):
+        rendered = self.book.render("9432.T")
+        self.assertIn("No current position in 9432.T", rendered)
+
+    def test_the_rule_is_not_japan_specific(self):
+        crypto = PortfolioContext.model_validate(
+            {"positions": [{"ticker": "BTC-USD", "quantity": 2}]})
+        self.assertEqual(crypto.position_in("BTCUSD").quantity, 2)

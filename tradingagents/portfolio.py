@@ -32,11 +32,25 @@ class PortfolioContext(BaseModel):
     positions: list[Position] = Field(default_factory=list)
 
     def position_in(self, ticker: str) -> Position | None:
-        return next((p for p in self.positions if p.ticker.upper() == ticker.strip().upper()), None)
+        """The held position in ``ticker``, matched on the canonical symbol.
+
+        A book and a run can spell one instrument differently — a ``7203.T``
+        holding analyzed as ``7203``, or a ``BTC-USD`` holding analyzed as
+        ``BTCUSD`` — and a raw string compare then reports the book as flat in
+        that name while listing the very same position under "other". The agents
+        read that as two instruments, so the guidance splits between a position
+        that is not there and one that is (#1364).
+        """
+        from tradingagents.dataflows.symbol_utils import normalize_symbol
+
+        wanted = normalize_symbol(ticker)
+        return next((p for p in self.positions if normalize_symbol(p.ticker) == wanted), None)
 
     def render(self, ticker: str) -> str:
         """The portfolio block for the decision agents, led by the analyzed instrument."""
-        symbol = ticker.strip().upper()
+        from tradingagents.dataflows.symbol_utils import normalize_symbol
+
+        symbol = normalize_symbol(ticker)
         held = self.position_in(symbol)
         if held is None:
             lines = [f"- No current position in {symbol}"]
