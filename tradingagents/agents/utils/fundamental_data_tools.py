@@ -28,7 +28,12 @@ def get_fundamentals(
 @tool
 def get_balance_sheet(
     ticker: Annotated[str, "ticker symbol"],
-    freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
+    freq: Annotated[
+        str,
+        "reporting frequency: 'annual' or 'quarterly'. Read both — a vendor that "
+        "serves statements as filed may only cover one of them, and the other "
+        "may be dated by the period it covers rather than by its publication.",
+    ] = "quarterly",
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
     trade_date: Annotated[str, InjectedState("trade_date")] = "",
 ) -> str:
@@ -48,7 +53,12 @@ def get_balance_sheet(
 @tool
 def get_cashflow(
     ticker: Annotated[str, "ticker symbol"],
-    freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
+    freq: Annotated[
+        str,
+        "reporting frequency: 'annual' or 'quarterly'. Read both — a vendor that "
+        "serves statements as filed may only cover one of them, and the other "
+        "may be dated by the period it covers rather than by its publication.",
+    ] = "quarterly",
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
     trade_date: Annotated[str, InjectedState("trade_date")] = "",
 ) -> str:
@@ -68,7 +78,12 @@ def get_cashflow(
 @tool
 def get_income_statement(
     ticker: Annotated[str, "ticker symbol"],
-    freq: Annotated[str, "reporting frequency: annual/quarterly"] = "quarterly",
+    freq: Annotated[
+        str,
+        "reporting frequency: 'annual' or 'quarterly'. Read both — a vendor that "
+        "serves statements as filed may only cover one of them, and the other "
+        "may be dated by the period it covers rather than by its publication.",
+    ] = "quarterly",
     curr_date: Annotated[str, "current date you are trading at, yyyy-mm-dd"] = None,
     trade_date: Annotated[str, InjectedState("trade_date")] = "",
 ) -> str:

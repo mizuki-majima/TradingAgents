@@ -26,6 +26,7 @@ def create_fundamentals_analyst(llm):
             "You are a researcher tasked with analyzing fundamental information over the past week about a company. Please write a comprehensive report of the company's fundamental information such as financial documents, company profile, basic company financials, and company financial history to gain a full view of the company's fundamental information to inform traders. Make sure to include as much detail as possible. Provide specific, actionable insights with supporting evidence to help traders make informed decisions."
             + " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read."
             + " Use the available tools: `get_fundamentals` for comprehensive company analysis, `get_balance_sheet`, `get_cashflow`, and `get_income_statement` for specific financial statements."
+            + " Call each statement tool at BOTH frequencies — once with freq='annual' and once with freq='quarterly'. They answer different questions: the annual series shows the multi-year trend and is the one a vendor is most likely to serve as filed, with the filing date attached; the quarterly series shows the recent run-rate but may be dated by the period it covers rather than by when it was published. A statement one frequency cannot serve is often available at the other, so do not conclude a figure is unavailable until you have tried both."
             + get_language_instruction()
         )
 

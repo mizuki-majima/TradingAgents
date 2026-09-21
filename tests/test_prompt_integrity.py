@@ -85,3 +85,33 @@ def test_a_report_that_was_never_produced_says_so(module, factory):
     prompt = " ".join(seen)
     assert "not part of this run" in prompt or "not available" in prompt, prompt[:400]
     assert "RSI 61" in prompt  # the report that does exist is still passed through
+
+
+@pytest.mark.unit
+def test_the_fundamentals_analyst_is_told_to_read_both_frequencies():
+    """Found in a live 6134 run against an annual-only filing-dated vendor.
+
+    Both statement tools default to ``freq="quarterly"``, so whether the
+    filing-dated series was read at all came down to which frequency the model
+    happened to pick. On 7203 it asked for annual and got EDINET DB; on 6134 it
+    asked for quarterly, EDINET DB declined (it serves annual only), yfinance
+    served period-dated figures instead, and the analyst reported revenue and
+    operating income as unavailable — for a year in which revenue rose 42% and
+    operating income 112%.
+    """
+    import inspect
+
+    from tradingagents.agents.analysts import fundamentals_analyst
+    from tradingagents.agents.utils import fundamental_data_tools
+
+    source = inspect.getsource(fundamentals_analyst.create_fundamentals_analyst)
+    assert "freq='annual'" in source and "freq='quarterly'" in source
+    assert "BOTH frequencies" in source
+
+    # The tool's own parameter description has to carry the reason too: a model
+    # reading only the signature must not take "quarterly" as the whole story.
+    for tool in (fundamental_data_tools.get_balance_sheet,
+                 fundamental_data_tools.get_cashflow,
+                 fundamental_data_tools.get_income_statement):
+        described = str(tool.args_schema.model_json_schema()["properties"]["freq"])
+        assert "Read both" in described, tool.name
