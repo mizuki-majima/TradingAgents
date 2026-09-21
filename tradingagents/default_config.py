@@ -165,6 +165,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # the budget is explicit rather than unbounded.
     "x_sentiment_model": "grok-4.6",
     "x_sentiment_max_posts": 60,
+    # Seconds to wait for the agentic x_search call, which issues several
+    # searches before answering (measured at ~113s for one week of a Tokyo
+    # listing). A timeout costs the run its only social source on that market.
+    "x_sentiment_timeout": 300,
     # EDINET has no company filter, so a filing is found by walking file dates
     # back from the analysis date. This bounds that walk. The per-day index is
     # cached and shared across tickers and runs, so only a cold cache pays it.

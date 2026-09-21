@@ -143,6 +143,57 @@ class TestXSentiment:
         assert block.startswith("<X sentiment unavailable")
         assert "XAI_API_KEY" in block
 
+    def test_a_timeout_says_which_knob_to_turn(self, monkeypatch):
+        """Measured live at ~113s for one week of a Tokyo listing.
+
+        A timeout is a fact about how long we waited, not about the instrument,
+        so it must not read like the other unavailable placeholders.
+        """
+        def _slow(*a, **k):
+            raise TimeoutError("timed out")
+
+        monkeypatch.setattr(x_sentiment, "urlopen", _slow)
+        set_config({"x_sentiment_timeout": 30})
+        block = x_sentiment.fetch_x_posts("7203.T", "2026-09-14", "2026-09-21")
+        assert "did not finish within 30s" in block
+        assert "x_sentiment_timeout" in block
+
+    def test_the_timeout_is_configurable(self, monkeypatch):
+        seen = {}
+
+        def _urlopen(request, timeout=None):
+            seen["timeout"] = timeout
+            return _xai_response({"output_text": "ok"})
+
+        monkeypatch.setattr(x_sentiment, "urlopen", _urlopen)
+        set_config({"x_sentiment_timeout": 123})
+        x_sentiment.fetch_x_posts("7203.T", "2026-09-14", "2026-09-21")
+        assert seen["timeout"] == 123.0
+
+    def test_a_long_citation_list_is_trimmed_but_its_size_is_reported(self, monkeypatch):
+        # Live runs cite 25+ bare status URLs, which would crowd out the posts.
+        urls = [f"https://x.com/i/status/{i}" for i in range(25)]
+        monkeypatch.setattr(x_sentiment, "urlopen", lambda *a, **k: _xai_response({
+            "output_text": "Read 25 posts.", "citations": urls,
+        }))
+        block = x_sentiment.fetch_x_posts("7203.T", "2026-09-14", "2026-09-21")
+        assert "25 total, 17 not listed" in block
+        assert urls[0] in block and urls[-1] not in block
+
+    def test_the_prompt_asks_for_the_posts_before_the_tally(self, monkeypatch):
+        """A tally without the posts is not usable: the analyst judges the posts."""
+        captured = {}
+        monkeypatch.setattr(
+            x_sentiment, "urlopen",
+            lambda request, timeout=None: (
+                captured.__setitem__("body", json.loads(request.data))
+                or _xai_response({"output_text": "ok"})
+            ),
+        )
+        x_sentiment.fetch_x_posts("7203.T", "2026-09-14", "2026-09-21")
+        prompt = captured["body"]["input"][0]["content"]
+        assert prompt.index("most substantive posts") < prompt.index("A one-line tally")
+
     def test_an_http_error_is_a_placeholder_not_an_exception(self, monkeypatch):
         from urllib.error import HTTPError
 

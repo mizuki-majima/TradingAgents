@@ -36,7 +36,17 @@ from .symbol_utils import normalize_symbol
 logger = logging.getLogger(__name__)
 
 _ENDPOINT = "https://api.x.ai/v1/responses"
-_TIMEOUT = 90.0
+
+# x_search is agentic: the model issues several searches and reads the results
+# before answering, so it is far slower than a plain completion. Measured at
+# 113s for one week of a Tokyo listing against 3s for a no-tool call, so the
+# default leaves real headroom — a timeout here costs the run its only social
+# source. ``x_sentiment_timeout`` overrides it.
+_DEFAULT_TIMEOUT = 300.0
+
+# How many cited post URLs to print. They carry no titles, so the list is for
+# spot-checking the digest, not for reading.
+_CITATIONS_SHOWN = 8
 
 # The exchange suffix decides which language the posts are in, and therefore how
 # the instrument is named on X: Japanese retail writes the bare 4-digit code,
@@ -78,12 +88,15 @@ def _prompt(symbol: str, term: str, start_date: str, end_date: str, max_posts: i
         f"Search X for what retail traders and investors posted about the listed "
         f"company with ticker {symbol} between {start_date} and {end_date}.\n\n"
         f"{_market_hint(symbol, term)}\n\n"
-        f"Read up to about {max_posts} posts. Then report, in this order:\n"
-        f"1. A one-line tally: how many posts you read, and how many were "
+        f"Read up to about {max_posts} posts.\n\n"
+        f"The posts themselves are what is wanted — another agent reads them and "
+        f"judges the sentiment, so a summary without them is not useful. Report:\n"
+        f"1. Up to 15 of the most substantive posts, and never fewer than every "
+        f"post you found if you found fewer than 15. For each, give the date, the "
+        f"handle, whether it reads bullish / bearish / neither, and the post's "
+        f"content in its own language.\n"
+        f"2. A one-line tally: how many posts you read, and how many were "
         f"bullish / bearish / neither about this company's stock.\n"
-        f"2. Up to 15 of the most substantive posts. For each, give the date, "
-        f"the handle, whether it reads bullish / bearish / neither, and the "
-        f"post's content in its own language.\n"
         f"3. The recurring topics, and any event the posts react to.\n\n"
         f"Rules: report only posts you actually retrieved, and quote them as "
         f"written. If you found few posts or none, say exactly that and give the "
@@ -146,6 +159,7 @@ def fetch_x_posts(
     config = get_config()
     max_posts = int(limit or config.get("x_sentiment_max_posts") or 60)
     model = config.get("x_sentiment_model") or "grok-4.6"
+    timeout = float(config.get("x_sentiment_timeout") or _DEFAULT_TIMEOUT)
 
     symbol = normalize_symbol(ticker)
     term = symbol.rsplit(".", 1)[0] if "." in symbol else symbol
@@ -174,12 +188,20 @@ def fetch_x_posts(
     )
 
     try:
-        with urlopen(request, timeout=_TIMEOUT) as response:
+        with urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read())
     except HTTPError as exc:
         # The key is in a header, not the URL, so the status is safe to report.
         logger.warning("X search failed for %s: HTTP %s", symbol, exc.code)
         return f"<X sentiment unavailable: xAI returned HTTP {exc.code}>"
+    except TimeoutError as exc:
+        # Distinct from a failure: the search was running and we stopped waiting,
+        # which is a knob to turn rather than a fact about the instrument.
+        logger.warning("X search timed out for %s after %.0fs: %s", symbol, timeout, exc)
+        return (
+            f"<X sentiment unavailable: the search did not finish within "
+            f"{timeout:.0f}s; raise x_sentiment_timeout or lower x_sentiment_max_posts>"
+        )
     except Exception as exc:  # noqa: BLE001 — a social source must not end a run
         logger.warning("X search failed for %s: %s", symbol, exc)
         return f"<X sentiment unavailable: {type(exc).__name__}>"
@@ -194,6 +216,15 @@ def fetch_x_posts(
         f"not a raw message stream. Up to {max_posts} posts were read.]\n\n{text}"
     )
     if citations:
-        listed = "\n".join(f"- {url}" for url in citations[:25])
-        block += f"\n\nSources the search cited:\n{listed}"
+        # These are bare status URLs with no titles, so a long list crowds out
+        # the posts without adding a readable signal. A handful is enough to
+        # spot-check the digest against; the count carries the rest.
+        shown = citations[:_CITATIONS_SHOWN]
+        listed = "\n".join(f"- {url}" for url in shown)
+        more = len(citations) - len(shown)
+        block += (
+            f"\n\nSources the search cited ({len(citations)} total"
+            + (f", {more} not listed" if more else "")
+            + f"):\n{listed}"
+        )
     return block

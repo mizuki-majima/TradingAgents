@@ -310,7 +310,11 @@ XAI_API_KEY=...                             # https://console.x.ai
 TRADINGAGENTS_SOCIAL_VENDORS=auto           # or e.g. "x,stocktwits" to force a chain
 ```
 
-The search is pinned to the analysis window with `from_date`/`to_date`, so unlike StockTwits and Reddit — which serve only their latest items — this one answers for a past window, which is what lets a backtest carry a sentiment read at all. Two things to keep in mind: the block is a search *agent's* digest rather than a raw message stream, so it is labelled as one and carries the post URLs it cited for you to check; and X Search is billed per post fetched, so `x_sentiment_max_posts` (default 60) caps each call.
+The search is pinned to the analysis window with `from_date`/`to_date`, so unlike StockTwits and Reddit — which serve only their latest items — this one answers for a past window, which is what lets a backtest carry a sentiment read at all. Three things to keep in mind:
+
+- It is a search *agent's* digest rather than a raw message stream, so the block is labelled as one and carries the post URLs it cited for you to spot-check. How much the model quotes varies run to run; the analyst is told to weigh the digest accordingly and to flag thin coverage in its `confidence` field.
+- The call is slow, because the model issues several searches before answering — measured at 110-150s for one week of a Tokyo listing, against 3s for a plain completion. `x_sentiment_timeout` (default 300s) governs it, and a timeout says so rather than reading like an absence of posts.
+- X Search is billed per post fetched, so `x_sentiment_max_posts` (default 60) caps each call.
 
 #### Fundamentals as filed (backtesting)
 
