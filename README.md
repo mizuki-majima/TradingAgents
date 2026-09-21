@@ -200,6 +200,14 @@ TradingAgents works with any market Yahoo Finance covers, using the exchange-suf
 - China A-shares: Shanghai `.SS`, Shenzhen `.SZ` (e.g. `600519.SS` for Kweichow Moutai)
 - Crypto: `BTC-USD`, `ETH-USD`
 
+The forms other vendors use resolve to the Yahoo symbol, so `7203.JP`, `7203.TYO` and `7203.TSE` all reach `7203.T`, and `09992.HK` and `600519.SH` reach `9992.HK` and `600519.SS`. To type your own market's bare codes, set the suffix they take:
+
+```bash
+TRADINGAGENTS_DEFAULT_EXCHANGE_SUFFIX=.T   # 7203 -> 7203.T; .HK turns 700 into 0700.HK
+```
+
+Tokyo listings have their own section below.
+
 <p align="center">
   <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
 </p>
@@ -271,6 +279,56 @@ SEC_EDGAR_USER_AGENT="Your Name your@email.com"
 ```
 
 It covers companies that file with the SEC, including foreign companies listed in the US. Anything else, such as Hong Kong or A-share listings, falls through to the next vendor in the chain. EDGAR's machine-readable filings begin in 2009, and a fourth quarter is reported as unavailable rather than derived, because filers publish it only inside the annual figure.
+
+### Japanese equities
+
+Prices, indicators and financial statements work for a `.T` listing as they do for a US one, and the alpha benchmark resolves to the Nikkei 225 on its own. Three things do not follow the ticker, so set them:
+
+```bash
+TRADINGAGENTS_DEFAULT_EXCHANGE_SUFFIX=.T    # type 7203 instead of 7203.T
+TRADINGAGENTS_OUTPUT_LANGUAGE=Japanese      # reports in Japanese; the debate stays in English
+```
+
+```python
+# Domestic news. Yahoo's feed is English: over one sample week it returned no
+# articles at all for 4063.T, 6098.T, 7741.T and 2413.T, and for 8306.T eight
+# that were about oil and gold. google_news searches the Japanese edition, so
+# 日経, 株探, 四季報オンライン and the 適時開示 summaries reach the analysts;
+# yfinance stays in the chain for whatever it returns nothing for.
+config["data_vendors"]["news_data"] = "google_news,yfinance"
+config["news_locale"] = "ja"   # also moves the macro headlines onto 日銀 / 日経平均
+```
+
+The news analyst is told to reach for the Japanese FRED series on a `.T` ticker — `boj_policy_rate`, `jp_10y`, `jp_cpi`, `jp_core_cpi`, `usdjpy`, `nikkei`, `jp_gdp` — instead of the Fed-shaped defaults, and the agents are told the quote currency is JPY and that domestic common stocks trade in 100-share units (単元株). `FRED_API_KEY` is still what turns the macro tool on.
+
+#### Retail sentiment
+
+StockTwits lists no Tokyo symbols (a `.T` request 404s) and the English subreddits do not discuss them, so `social_vendors` defaults to `"auto"` and puts a `.T` run on X instead, through xAI's `x_search` tool. Set `XAI_API_KEY`; without it the source reports itself unavailable rather than going quiet.
+
+```bash
+XAI_API_KEY=...                             # https://console.x.ai
+TRADINGAGENTS_SOCIAL_VENDORS=auto           # or e.g. "x,stocktwits" to force a chain
+```
+
+The search is pinned to the analysis window with `from_date`/`to_date`, so unlike StockTwits and Reddit — which serve only their latest items — this one answers for a past window, which is what lets a backtest carry a sentiment read at all. Two things to keep in mind: the block is a search *agent's* digest rather than a raw message stream, so it is labelled as one and carries the post URLs it cited for you to check; and X Search is billed per post fetched, so `x_sentiment_max_posts` (default 60) caps each call.
+
+#### Fundamentals as filed (backtesting)
+
+`sec_edgar` serves US filers as filed. `edinet` is the Tokyo counterpart, reading 金融庁's EDINET, and it matters for the same reason: a Japanese filer publishes its 有価証券報告書 about three months after the fiscal year ends, so a backtest dated inside that gap otherwise reads figures nobody could have seen. A free subscription key comes from https://api.edinet-fsa.go.jp.
+
+```bash
+EDINET_API_KEY=...
+```
+```python
+config["data_vendors"]["fundamental_data"] = "edinet,yfinance"
+```
+
+Non-Tokyo tickers fall straight through to the next vendor, and `get_fundamentals` (the profile overview, which EDINET does not serve) keeps using yfinance, so one chain works for a mixed book.
+
+Two properties of EDINET shape how this behaves:
+
+- **The first run for a date range is slow.** `documents.json` is indexed by file date with no company filter, so a filing is found by walking file dates backwards from the analysis date. The per-day index is cached on disk and shared across every ticker and run, so a backtest grid pays that walk once and not again. `edinet_scan_days` (default 450) bounds it.
+- **Quarterly reports ended in 2024.** 四半期報告書 was abolished for periods from April 2024, so `freq="quarterly"` serves the 半期報告書 that replaced it and labels it as half a year rather than implying a quarter. Quarterly detail is published as a 決算短信 through TDnet, which this API does not carry — if you need quarterly granularity for recent periods, keep `yfinance` in the chain and accept that those columns are period-dated, not filing-dated.
 
 ### Current holdings
 

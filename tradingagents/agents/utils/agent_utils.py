@@ -195,7 +195,29 @@ def build_instrument_context(
             " Treat it as a crypto asset rather than a company, and do not "
             "assume company fundamentals are available."
         )
+    context += _market_conventions(ticker)
     return context
+
+
+# Per-market trading conventions the agents cannot read off the price series.
+# Without them a Tokyo proposal reads as a US one: prices quoted in dollars, and
+# a size in single shares that the market cannot fill (#1364).
+_MARKET_CONVENTIONS = {
+    ".T": (
+        " This is a Tokyo (JPX) listing: prices and every level you quote are in "
+        "JPY, not USD, and domestic common stocks trade in 100-share units "
+        "(単元株), so express any size in whole 100-share lots."
+    ),
+}
+
+
+def _market_conventions(ticker: str) -> str:
+    """Quote currency and lot size for the exchange this ticker trades on."""
+    upper = str(ticker).upper()
+    for suffix, note in _MARKET_CONVENTIONS.items():
+        if upper.endswith(suffix):
+            return note
+    return ""
 
 
 def get_instrument_context_from_state(state: Mapping[str, Any]) -> str:

@@ -12,6 +12,9 @@ differ from the broker / TradingView / MT5 style symbols users often type:
     SPX500, US500     ^GSPC             index CFDs map to Yahoo index symbols
     09992.HK, 700.HK  9992.HK, 0700.HK  HK codes are zero-padded to 4 digits
     600519.SH         600519.SS         Yahoo spells Shanghai ``.SS``
+    7203.JP, 7203.TYO 7203.T            Yahoo spells Tokyo ``.T``
+    7203             7203.T            a bare local code takes the configured
+                                        ``default_exchange_suffix``
 
 Passing the raw broker symbol to Yahoo returns an empty result, which the
 agents previously received as free text and could hallucinate a price
@@ -78,6 +81,18 @@ _YAHOO_SAFE = re.compile(r"^[A-Za-z0-9._\-\^=]+$")
 _HK_CODE = re.compile(r"^(\d{1,5})\.HK$")
 _SHANGHAI_SH = re.compile(r"^(\d{6})\.SH$")
 
+# The Tokyo Stock Exchange listing that Yahoo spells ``7203.T`` is spelled
+# ``7203.JP`` by Bloomberg-style feeds, ``7203.TYO`` by Google Finance, and
+# ``7203.TSE``/``7203.TKS`` by several brokers. They name one listing, so they
+# resolve to the one symbol Yahoo answers to (#1364).
+_TOKYO_SUFFIX = re.compile(r"^([0-9]{3}[0-9A-Z])\.(?:JP|JPX|TYO|TSE|TKS)$")
+
+# A local exchange code carrying no suffix at all: 3-6 digits, optionally with
+# JPX's trailing letter (codes issued since 2024 read ``130A``). Yahoo answers to
+# none of these bare — every non-US market needs its suffix — so they are only
+# ever resolved through ``default_exchange_suffix``, never guessed.
+_BARE_LOCAL_CODE = re.compile(r"^(?:[0-9]{3,6}|[0-9]{3}[A-Z])$")
+
 
 # Crypto quote currencies that all map to Yahoo's USD pair. Yahoo lists only
 # ``<BASE>-USD`` (not the USDT/USDC stablecoin pairs), so a broker symbol quoted
@@ -107,6 +122,24 @@ def _normalize_crypto(s: str) -> str | None:
     return f"{base}-USD" if base else None
 
 
+def _default_exchange_suffix() -> str:
+    """The suffix appended to a bare local code, from config; ``""`` disables it.
+
+    Read lazily so this module stays importable from anywhere in the data layer
+    and keeps working when no config has been initialised.
+    """
+    try:
+        from .config import get_config
+
+        suffix = get_config().get("default_exchange_suffix") or ""
+    except Exception:  # noqa: BLE001 — a missing config must never break symbol resolution
+        return ""
+    suffix = str(suffix).strip().upper()
+    if not suffix:
+        return ""
+    return suffix if suffix.startswith(".") else f".{suffix}"
+
+
 def normalize_symbol(raw: str) -> str:
     """Map a user/broker symbol to its canonical Yahoo Finance symbol.
 
@@ -118,12 +151,20 @@ def normalize_symbol(raw: str) -> str:
       4. HK rule: a numeric ``.HK`` code -> Yahoo's 4-digit padding
          (``09992.HK`` -> ``9992.HK``, ``700.HK`` -> ``0700.HK``).
       5. Shanghai rule: ``600519.SH`` -> ``600519.SS``.
-      6. Otherwise the upper-cased symbol is returned unchanged (plain
+      6. Tokyo rule: ``7203.JP`` / ``.TYO`` / ``.TSE`` / ``.TKS`` -> ``7203.T``.
+      7. Otherwise the upper-cased symbol is returned unchanged (plain
          equities, ETFs, Yahoo-native symbols like ``GC=F`` or ``^GSPC``).
 
     A trailing ``+`` (broker CFD marker, e.g. ``XAUUSD+``) is stripped before
-    matching. The function is purely syntactic — it performs no network
-    calls — so it is safe to apply on every request.
+    matching. A bare local code (``7203``) first takes the configured
+    ``default_exchange_suffix`` and is then resolved by the rules above, so a
+    ``.T`` desk can type ``7203`` and a ``.HK`` desk can type ``700``. The
+    default is empty, which leaves a bare code untouched: Yahoo answers to no
+    suffixless non-US code, and guessing a market from digits alone would price
+    a different listing than the user meant.
+
+    The function is purely syntactic — it performs no network calls — so it is
+    safe to apply on every request.
     """
     if not isinstance(raw, str) or not raw.strip():
         return raw
@@ -131,6 +172,11 @@ def normalize_symbol(raw: str) -> str:
     s = raw.strip().upper()
     # Broker CFD/qualifier suffixes Yahoo never uses.
     s = s.rstrip("+")
+
+    # A suffixless local code is completed before the rules below run, so the
+    # result still goes through them (``700`` -> ``700.HK`` -> ``0700.HK``).
+    if _BARE_LOCAL_CODE.fullmatch(s):
+        s += _default_exchange_suffix()
 
     crypto = _normalize_crypto(s)
     if s in _ALIASES:
@@ -143,6 +189,8 @@ def normalize_symbol(raw: str) -> str:
         canonical = f"{int(hk.group(1)):04d}.HK"
     elif sh := _SHANGHAI_SH.match(s):
         canonical = f"{sh.group(1)}.SS"
+    elif jp := _TOKYO_SUFFIX.match(s):
+        canonical = f"{jp.group(1)}.T"
     else:
         canonical = s
 

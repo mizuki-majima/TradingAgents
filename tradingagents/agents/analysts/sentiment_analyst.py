@@ -5,17 +5,21 @@ the old version had a prompt that demanded social-media analysis but the
 only tool available was Yahoo Finance news — which led LLMs to fabricate
 Reddit/X/StockTwits content under prompt pressure (verified live).
 
-The redesigned agent pre-fetches three complementary data sources before
-the LLM is invoked and injects them into the prompt as structured blocks:
+The redesigned agent pre-fetches complementary data sources before the LLM
+is invoked and injects them into the prompt as structured blocks:
 
-  1. News headlines     — Yahoo Finance (institutional framing)
-  2. StockTwits messages — retail-trader posts indexed by cashtag, with
-                           user-labeled Bullish/Bearish sentiment tags
-  3. Reddit posts        — r/wallstreetbets, r/stocks, r/investing
+  1. News headlines  — the configured news vendor (institutional framing)
+  2. Social feeds    — resolved per market by ``dataflows.social``: StockTwits
+                       and Reddit for US listings, X (via xAI's search tool)
+                       for Tokyo listings, which neither of the other two
+                       covers. Each feed carries its own reading guidance into
+                       the prompt, so the agent is never told how to read a
+                       ratio it was not given.
 
-Each source is trimmed to the analysis window. These text feeds serve recent
-items and are not archived as of a past date, so sentiment inputs for a
-historical run are not guaranteed to be point-in-time.
+Each source is trimmed to the analysis window. StockTwits and Reddit serve
+recent items and are not archived as of a past date, so sentiment inputs from
+them for a historical run are not point-in-time; the X source is searched with
+an explicit date range and is.
 
 The agent does not use tool-calling; the data is in the prompt from
 turn 0. Output uses the structured-output pattern (json_schema for
@@ -44,8 +48,7 @@ from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
 )
-from tradingagents.dataflows.reddit import fetch_reddit_posts
-from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
+from tradingagents.dataflows.social import SocialSource, resolve_social_sources
 
 
 def _seven_days_back(trade_date: str) -> str:
@@ -55,10 +58,10 @@ def _seven_days_back(trade_date: str) -> str:
 def create_sentiment_analyst(llm):
     """Create a sentiment analyst node for the trading graph.
 
-    Pre-fetches news + StockTwits + Reddit data, injects them into the
-    prompt as structured blocks, and produces a deterministic sentiment
-    report via structured output (with a free-text fallback for providers
-    that do not support it).
+    Pre-fetches news plus the social feeds that cover this market, injects
+    them into the prompt as structured blocks, and produces a deterministic
+    sentiment report via structured output (with a free-text fallback for
+    providers that do not support it).
     """
     structured_llm = bind_structured(llm, SentimentReport, "Sentiment Analyst")
 
@@ -68,24 +71,20 @@ def create_sentiment_analyst(llm):
         start_date = _seven_days_back(end_date)
         instrument_context = get_instrument_context_from_state(state)
 
-        # Pre-fetch all three sources. Each fetcher degrades gracefully and
-        # returns a string (no exceptions surface from here), so the LLM
-        # always sees something — either real data or a clear placeholder.
+        # Pre-fetch every source. Each fetcher degrades gracefully and returns
+        # a string (no exceptions surface from here), so the LLM always sees
+        # something — either real data or a clear placeholder. The window is
+        # passed through so a historical run trims social posts to it instead
+        # of leaking today's chatter into a backtest (#1220).
         news_block = get_news.func(ticker, start_date, end_date)
-        # Pass the analysis window so a historical run trims social posts to it
-        # instead of leaking today's chatter into a backtest (#1220).
-        stocktwits_block = fetch_stocktwits_messages(
-            ticker, limit=30, start_date=start_date, end_date=end_date
-        )
-        reddit_block = fetch_reddit_posts(ticker, start_date=start_date, end_date=end_date)
+        social_sources = resolve_social_sources(ticker, start_date, end_date)
 
         system_message = _build_system_message(
             ticker=ticker,
             start_date=start_date,
             end_date=end_date,
             news_block=news_block,
-            stocktwits_block=stocktwits_block,
-            reddit_block=reddit_block,
+            social_sources=social_sources,
         )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -130,58 +129,70 @@ def create_sentiment_analyst(llm):
     return sentiment_analyst_node
 
 
+def _slug(name: str) -> str:
+    """A tag-safe token for a source's delimiters (``StockTwits messages …`` -> ``stocktwits``)."""
+    head = name.split("—")[0].split(" - ")[0]
+    return "".join(ch for ch in head.lower() if ch.isalnum()) or "source"
+
+
+def _source_blocks(sources: list[SocialSource]) -> str:
+    """Render each resolved feed with its own reading guidance and delimiters."""
+    if not sources:
+        # Saying "no social sources" is the finding; an empty section would
+        # read as feeds that returned nothing.
+        return (
+            "### Social feeds\n"
+            "No social feed is configured for this market, so there is no "
+            "retail-sentiment input in this run. This is an absence of data, "
+            "not an absence of chatter — say so in `confidence`.\n"
+        )
+    parts = []
+    for source in sources:
+        tag = _slug(source.name)
+        parts.append(
+            f"### {source.name}\n{source.guidance}\n\n"
+            f"<start_of_{tag}>\n{source.text}\n<end_of_{tag}>\n"
+        )
+    return "\n".join(parts)
+
+
 def _build_system_message(
     *,
     ticker: str,
     start_date: str,
     end_date: str,
     news_block: str,
-    stocktwits_block: str,
-    reddit_block: str,
+    social_sources: list[SocialSource],
 ) -> str:
     """Assemble the sentiment-analyst system message with structured data blocks."""
-    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
+    count = 1 + len(social_sources)
+    return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on the {count} data source(s) that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
 
-### News headlines — Yahoo Finance, past 7 days
+### News headlines — the configured news vendor, past 7 days
 Institutional framing. Fact-driven, slower-moving signal.
 
 <start_of_news>
 {news_block}
 <end_of_news>
 
-### StockTwits messages — retail-trader social platform indexed by cashtag
-Fast-moving signal. Each message carries a user-labeled sentiment tag (Bullish / Bearish / no-label) plus the message body.
-
-<start_of_stocktwits>
-{stocktwits_block}
-<end_of_stocktwits>
-
-### Reddit posts — r/wallstreetbets, r/stocks, r/investing (past 7 days)
-Community discussion, without vote or comment counts. Subreddit character matters (r/wallstreetbets is often contrarian/exuberant; r/stocks more measured; r/investing longer-term).
-
-<start_of_reddit>
-{reddit_block}
-<end_of_reddit>
-
+{_source_blocks(social_sources)}
 ## How to analyze this data (best practices)
 
-1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
+1. **Read each source on its own terms.** Each block above states what it is and how to weigh it; follow that, and do not apply one source's reading rules to another.
 
-2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
+2. **Look for cross-source divergences.** If news framing is bearish but retail is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
 
-3. **Read Reddit posts for substance.** The feed carries no vote or comment counts, so judge a post by its body excerpt, not its title alone, and do not infer engagement.
+3. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a retail post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
 
-4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
+4. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
 
-5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
+5. **Be honest about data limits.** If a source returned only a handful of items, or an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. A placeholder is a source that could not be read, which is not the same as a source that was read and found nothing; do not report either as quiet agreement, and never fill the gap from general knowledge about the company.
 
-6. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this explicitly in the `confidence` field and the narrative. If the sources are silent on a given subreddit, say so.
+6. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
 
-7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
-
-8. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
+7. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 
 ## Output fields
 

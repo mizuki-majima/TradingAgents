@@ -17,6 +17,11 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
+    "TRADINGAGENTS_DEFAULT_EXCHANGE_SUFFIX": "default_exchange_suffix",
+    "TRADINGAGENTS_NEWS_LOCALE":          "news_locale",
+    "TRADINGAGENTS_NEWS_QUERY_TEMPLATE":  "news_query_template",
+    "TRADINGAGENTS_SOCIAL_VENDORS":       "social_vendors",
+    "TRADINGAGENTS_EDINET_SCAN_DAYS":     "edinet_scan_days",
     "TRADINGAGENTS_TEMPERATURE":          "temperature",
     "TRADINGAGENTS_LLM_MAX_RETRIES":      "llm_max_retries",
     "TRADINGAGENTS_MAX_TOKENS":           "max_tokens",
@@ -131,6 +136,44 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "ECB Bank of England BOJ central bank policy",
         "oil commodities supply chain energy",
     ],
+    # Per-locale replacements for the queries above, used by the google_news
+    # vendor when the resolved locale has an entry here. A Japanese run reads
+    # the domestic macro flow rather than a translated Fed-shaped query; the
+    # locale falls back to ``global_news_queries`` when it is not listed.
+    "global_news_queries_by_locale": {
+        "ja": [
+            "日銀 金融政策決定会合 政策金利",
+            "日経平均 企業業績 景気見通し",
+            "円相場 為替 輸出企業 業績影響",
+            "地政学リスク 通商政策 関税",
+            "原油 商品市況 エネルギー価格",
+        ],
+    },
+    # Language/edition for the google_news vendor. "auto" derives it from the
+    # ticker's exchange suffix (.T reads Japanese) and uses English for the
+    # instrument-less global-news call; "en"/"ja" pin every search to one.
+    "news_locale": "auto",
+    # Overrides the google_news per-ticker search phrasing. ``{term}`` is the
+    # listing's code (Tokyo) or symbol. The per-locale default is tuned for
+    # company relevance over volume; set this to widen or narrow it.
+    "news_query_template": None,
+    # Social feeds the Sentiment Analyst reads. "auto" picks by exchange —
+    # StockTwits + Reddit for US listings, X for Tokyo ones, which neither of
+    # those two covers — or name a chain explicitly, e.g. "stocktwits,reddit,x".
+    "social_vendors": "auto",
+    # X sentiment (needs XAI_API_KEY). X Search is billed per post fetched, so
+    # the budget is explicit rather than unbounded.
+    "x_sentiment_model": "grok-4.6",
+    "x_sentiment_max_posts": 60,
+    # EDINET has no company filter, so a filing is found by walking file dates
+    # back from the analysis date. This bounds that walk. The per-day index is
+    # cached and shared across tickers and runs, so only a cold cache pays it.
+    "edinet_scan_days": 450,
+    # Appended to a bare local exchange code so a desk can type its own market's
+    # codes: ".T" resolves 7203 to 7203.T, ".HK" resolves 700 to 0700.HK. Empty
+    # (the default) leaves a bare code untouched — guessing a market from digits
+    # alone would price a different listing than the user meant.
+    "default_exchange_suffix": "",
     # Data vendor configuration
     # Category-level configuration (default for all tools in category).
     # The configured value is the exact vendor chain — requests are NOT silently

@@ -76,6 +76,26 @@ MACRO_SERIES = {
     "consumer_sentiment": "UMCSENT",
     "housing_starts": "HOUST",
     "retail_sales": "RSAFS",
+    # Japan. Every alias above reads the US series, which is the wrong macro
+    # backdrop for a Tokyo listing: a .T decision turns on the BOJ policy rate,
+    # the yen and the JGB curve, not on the Fed. FRED republishes the BOJ/OECD
+    # series, so these need no second vendor or key.
+    "boj_policy_rate": "IRSTCI01JPM156N",   # call money/interbank, the BOJ target proxy
+    "jp_policy_rate": "IRSTCI01JPM156N",
+    "jp_10y": "IRLTLT01JPM156N",            # 10-year JGB yield
+    "jgb_10y": "IRLTLT01JPM156N",
+    "jp_cpi": "JPNCPIALLMINMEI",
+    "jp_core_cpi": "JPNCPICORMINMEI",       # ex food and energy
+    "jp_unemployment": "LRHUTTTTJPM156S",
+    "jp_gdp": "JPNRGDPEXP",                 # real GDP
+    "jp_industrial_production": "JPNPROINDMISMEI",
+    "jp_consumer_confidence": "CSCICP03JPM665S",
+    "jp_business_confidence": "BSCICP03JPM665S",
+    "usdjpy": "DEXJPUS",                    # yen per dollar, daily
+    "yen": "DEXJPUS",
+    "nikkei": "NIKKEI225",
+    "nikkei225": "NIKKEI225",
+    "nikkei_225": "NIKKEI225",
 }
 
 

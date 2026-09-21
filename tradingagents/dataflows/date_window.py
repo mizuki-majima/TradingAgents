@@ -50,7 +50,12 @@ def coverage_gap(
     """
     now = datetime.now(timezone.utc)
     oldest = min((to_utc(d) for d in dates if d is not None), default=now)
-    if datetime.strptime(end_date, "%Y-%m-%d").date() > now.date():
+    # "Today" is the later of the run's own calendar day and UTC's. East of UTC
+    # the local date runs ahead for part of every day — 08:00 in Tokyo is still
+    # yesterday in UTC — so a same-day run there would otherwise have every news
+    # and social window reported as reaching into the future (#1364).
+    today = max(get_current_date(), f"{now:%Y-%m-%d}")
+    if end_date > today:
         reason = "the window extends past today"
     elif oldest.date() > datetime.strptime(start_date, "%Y-%m-%d").date():
         reason = f"it only serves recent items (coverage starts {oldest:%Y-%m-%d})"

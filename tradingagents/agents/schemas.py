@@ -29,6 +29,10 @@ from pydantic import BaseModel, Field, field_validator
 # strings ("189.5") to float.
 _NULLISH_FLOAT = {"", "none", "n/a", "na", "null", "nil", "-", "tbd", "unknown"}
 
+# Currency units written after the number rather than before it. Compared
+# upper-cased; the CJK forms are unaffected by case.
+_TRAILING_UNITS = ("円", "元", "JPY", "USD", "EUR", "GBP", "HKD", "CNY", "YEN")
+
 
 def _coerce_optional_float(value):
     """Normalise an LLM-written optional numeric field before validation.
@@ -52,6 +56,13 @@ def _coerce_optional_float(value):
     if text.lower() in _NULLISH_FLOAT or text.endswith("%"):
         return None
     cleaned = text.replace(",", "").lstrip("$€£¥").strip()
+    # A non-US run writes the unit where the symbol would go ("3025円",
+    # "3025 JPY"), and dropping the level over its unit would lose a stop the
+    # model did state.
+    for unit in _TRAILING_UNITS:
+        if cleaned.upper().endswith(unit):
+            cleaned = cleaned[: -len(unit)].strip()
+            break
     try:
         return float(cleaned)
     except ValueError:

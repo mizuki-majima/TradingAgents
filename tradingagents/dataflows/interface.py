@@ -12,12 +12,21 @@ from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
 )
 from .config import get_config
+from .edinet import (
+    get_balance_sheet as get_edinet_balance_sheet,
+    get_cashflow as get_edinet_cashflow,
+    get_income_statement as get_edinet_income_statement,
+)
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
     VendorRateLimitError,
 )
 from .fred import get_macro_data as get_fred_macro_data
+from .google_news import (
+    get_global_news as get_google_global_news,
+    get_news as get_google_news,
+)
 from .polymarket import get_prediction_markets as get_polymarket_prediction_markets
 from .sec_edgar import (
     get_balance_sheet as get_sec_edgar_balance_sheet,
@@ -84,7 +93,9 @@ TOOLS_CATEGORIES = {
 
 VENDOR_LIST = [
     "yfinance",
+    "google_news",
     "sec_edgar",
+    "edinet",
     "fred",
     "polymarket",
     "alpha_vantage",
@@ -116,26 +127,31 @@ VENDOR_METHODS = {
     },
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
+        "edinet": get_edinet_balance_sheet,
         "sec_edgar": get_sec_edgar_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
+        "edinet": get_edinet_cashflow,
         "sec_edgar": get_sec_edgar_cashflow,
         "yfinance": get_yfinance_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
+        "edinet": get_edinet_income_statement,
         "sec_edgar": get_sec_edgar_income_statement,
         "yfinance": get_yfinance_income_statement,
     },
     # news_data
     "get_news": {
         "alpha_vantage": get_alpha_vantage_news,
+        "google_news": get_google_news,
         "yfinance": get_news_yfinance,
     },
     "get_global_news": {
         "yfinance": get_global_news_yfinance,
+        "google_news": get_google_global_news,
         "alpha_vantage": get_alpha_vantage_global_news,
     },
     "get_insider_transactions": {
