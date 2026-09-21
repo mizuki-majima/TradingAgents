@@ -17,6 +17,11 @@ from .edinet import (
     get_cashflow as get_edinet_cashflow,
     get_income_statement as get_edinet_income_statement,
 )
+from .edinetdb import (
+    get_balance_sheet as get_edinetdb_balance_sheet,
+    get_cashflow as get_edinetdb_cashflow,
+    get_income_statement as get_edinetdb_income_statement,
+)
 from .errors import (
     NoMarketDataError,
     VendorNotConfiguredError,
@@ -96,6 +101,7 @@ VENDOR_LIST = [
     "google_news",
     "sec_edgar",
     "edinet",
+    "edinetdb",
     "fred",
     "polymarket",
     "alpha_vantage",
@@ -128,18 +134,21 @@ VENDOR_METHODS = {
     "get_balance_sheet": {
         "alpha_vantage": get_alpha_vantage_balance_sheet,
         "edinet": get_edinet_balance_sheet,
+        "edinetdb": get_edinetdb_balance_sheet,
         "sec_edgar": get_sec_edgar_balance_sheet,
         "yfinance": get_yfinance_balance_sheet,
     },
     "get_cashflow": {
         "alpha_vantage": get_alpha_vantage_cashflow,
         "edinet": get_edinet_cashflow,
+        "edinetdb": get_edinetdb_cashflow,
         "sec_edgar": get_sec_edgar_cashflow,
         "yfinance": get_yfinance_cashflow,
     },
     "get_income_statement": {
         "alpha_vantage": get_alpha_vantage_income_statement,
         "edinet": get_edinet_income_statement,
+        "edinetdb": get_edinetdb_income_statement,
         "sec_edgar": get_sec_edgar_income_statement,
         "yfinance": get_yfinance_income_statement,
     },

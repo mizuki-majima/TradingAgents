@@ -43,7 +43,8 @@ def get_current_date():
     return date.today().strftime("%Y-%m-%d")
 
 
-def get_scrubbed(url: str, *, params: dict, timeout: float, secret: str, passthrough=()):
+def get_scrubbed(url: str, *, params: dict, timeout: float, secret: str, passthrough=(),
+                 headers: dict | None = None):
     """``requests.get`` plus ``raise_for_status``, with ``secret`` kept out of errors.
 
     Vendors that authenticate with a query parameter put the key in the URL, and
@@ -53,9 +54,13 @@ def get_scrubbed(url: str, *, params: dict, timeout: float, secret: str, passthr
     attached: no request or response (both hold the URL) and no exception chain,
     which is why this raises after the ``except`` block rather than inside it.
     Statuses in ``passthrough`` are returned for the caller to handle.
+
+    ``headers`` carries the key for vendors that authenticate that way instead;
+    the scrubbing still applies, since a header key can reach a log through a
+    redirect or a proxy error.
     """
     try:
-        response = requests.get(url, params=params, timeout=timeout)
+        response = requests.get(url, params=params, timeout=timeout, headers=headers)
         if response.status_code not in passthrough:
             response.raise_for_status()
         return response

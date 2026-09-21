@@ -169,6 +169,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # back from the analysis date. This bounds that walk. The per-day index is
     # cached and shared across tickers and runs, so only a cold cache pays it.
     "edinet_scan_days": 450,
+    # How many filed fiscal years the edinetdb vendor renders per statement.
+    "edinetdb_periods": 3,
     # Appended to a bare local exchange code so a desk can type its own market's
     # codes: ".T" resolves 7203 to 7203.T, ".HK" resolves 700 to 0700.HK. Empty
     # (the default) leaves a bare code untouched — guessing a market from digits

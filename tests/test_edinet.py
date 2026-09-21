@@ -20,7 +20,11 @@ import pytest
 
 from tradingagents.dataflows import edinet, interface
 from tradingagents.dataflows.config import set_config
-from tradingagents.dataflows.errors import NoMarketDataError, VendorNotConfiguredError
+from tradingagents.dataflows.errors import (
+    NoMarketDataError,
+    VendorNotConfiguredError,
+    VendorRateLimitError,
+)
 
 _HEADER = ["要素ID", "項目名", "コンテキストID", "相対年度", "連結・個別", "期間・時点", "ユニットID", "単位", "値"]
 
@@ -150,6 +154,41 @@ class TestDayIndex:
     def test_a_date_edinet_has_no_file_for_is_an_empty_day_not_an_error(self, monkeypatch):
         monkeypatch.setattr(edinet, "get_scrubbed", lambda *a, **k: _response(status=404))
         assert edinet._day_index("2004-01-05") == []
+
+    def test_a_rejected_key_is_an_error_even_though_it_arrives_as_http_200(self, monkeypatch):
+        """Verified against the live API: EDINET puts the failure in the body.
+
+        The response is ``200 OK`` carrying ``{"StatusCode": 401}`` and no
+        ``results``, so raise_for_status never fires. Read as a quiet day, a
+        whole backtest would report every Japanese company as having filed
+        nothing.
+        """
+        monkeypatch.setattr(edinet, "get_scrubbed", lambda *a, **k: _response(payload={
+            "StatusCode": 401,
+            "message": "Access denied due to invalid subscription key.",
+        }))
+        with pytest.raises(VendorNotConfiguredError) as caught:
+            edinet._day_index("2026-06-25")
+        assert "32 hex characters" in str(caught.value)
+
+    def test_an_in_body_404_is_still_just_an_empty_day(self, monkeypatch):
+        monkeypatch.setattr(edinet, "get_scrubbed", lambda *a, **k: _response(
+            payload={"StatusCode": 404, "message": "Not Found"}))
+        assert edinet._day_index("2004-01-05") == []
+
+    def test_an_in_body_server_error_is_not_silently_empty(self, monkeypatch):
+        monkeypatch.setattr(edinet, "get_scrubbed", lambda *a, **k: _response(
+            payload={"StatusCode": 500, "message": "Internal Server Error"}))
+        with pytest.raises(VendorRateLimitError):
+            edinet._day_index("2026-06-25")
+
+    def test_a_successful_response_carries_its_ok_status(self, monkeypatch):
+        monkeypatch.setattr(edinet, "get_scrubbed", lambda *a, **k: _response(payload={
+            "metadata": {"status": "200", "message": "OK"},
+            "results": [{"secCode": "72030", "docID": "S1", "docTypeCode": "120",
+                         "csvFlag": "1", "withdrawalStatus": "0", "disclosureStatus": "0"}],
+        }))
+        assert [r["docID"] for r in edinet._day_index("2026-06-25")] == ["S1"]
 
 
 @pytest.mark.unit

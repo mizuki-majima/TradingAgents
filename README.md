@@ -314,21 +314,33 @@ The search is pinned to the analysis window with `from_date`/`to_date`, so unlik
 
 #### Fundamentals as filed (backtesting)
 
-`sec_edgar` serves US filers as filed. `edinet` is the Tokyo counterpart, reading 金融庁's EDINET, and it matters for the same reason: a Japanese filer publishes its 有価証券報告書 about three months after the fiscal year ends, so a backtest dated inside that gap otherwise reads figures nobody could have seen. A free subscription key comes from https://api.edinet-fsa.go.jp.
+`sec_edgar` serves US filers as filed. Tokyo has two counterparts, and both exist for the same reason: a Japanese filer publishes its 有価証券報告書 about three months after the fiscal year ends, so a backtest dated inside that gap otherwise reads figures nobody could have seen.
+
+**`edinetdb`** (recommended) reads EDINET DB, a third-party service that has already parsed the filings. One request returns a company's annual history normalised across JP-GAAP, IFRS and US GAAP, each year carrying the `submit_date` of the filing it came from.
 
 ```bash
-EDINET_API_KEY=...
+EDINETDB_API_KEY=...        # https://edinetdb.jp; keys begin with "edb_"
+```
+```python
+config["data_vendors"]["fundamental_data"] = "edinetdb,yfinance"
+```
+
+**`edinet`** reads 金融庁's own API, which is authoritative and free but is indexed by file date with no company filter, so a filing is found by walking dates backwards and parsing XBRL-to-CSV. Prefer it when you want the source of record rather than a vendor's parse.
+
+```bash
+EDINET_API_KEY=...          # https://api.edinet-fsa.go.jp; 32 hex characters
 ```
 ```python
 config["data_vendors"]["fundamental_data"] = "edinet,yfinance"
 ```
 
-Non-Tokyo tickers fall straight through to the next vendor, and `get_fundamentals` (the profile overview, which EDINET does not serve) keeps using yfinance, so one chain works for a mixed book.
+With either one, non-Tokyo tickers fall straight through to the next vendor and `get_fundamentals` (the profile overview, which neither serves) keeps using yfinance, so one chain works for a mixed book.
 
-Two properties of EDINET shape how this behaves:
+What to know before relying on them:
 
-- **The first run for a date range is slow.** `documents.json` is indexed by file date with no company filter, so a filing is found by walking file dates backwards from the analysis date. The per-day index is cached on disk and shared across every ticker and run, so a backtest grid pays that walk once and not again. `edinet_scan_days` (default 450) bounds it.
-- **Quarterly reports ended in 2024.** 四半期報告書 was abolished for periods from April 2024, so `freq="quarterly"` serves the 半期報告書 that replaced it and labels it as half a year rather than implying a quarter. Quarterly detail is published as a 決算短信 through TDnet, which this API does not carry — if you need quarterly granularity for recent periods, keep `yfinance` in the chain and accept that those columns are period-dated, not filing-dated.
+- **`edinetdb` is annual only, and not restatement-vintage.** It serves each year's value as currently reported with `is_restated_*` flags, so a figure restated later reads as restated — which SEC EDGAR would not do. The large leak, reading a year before it was published, is closed; that smaller one is not. An interim request falls through to the next vendor. Its free tier is a daily request budget, so responses are cached per company per day.
+- **`edinet`'s first run over a date range is slow.** The per-day index is cached on disk and shared across every ticker and run, so a backtest grid pays the walk once. `edinet_scan_days` (default 450) bounds it. It also answers a rejected key with `HTTP 200` carrying `StatusCode: 401`, which would read as "this company filed nothing" on every date — the vendor detects that and raises instead.
+- **Quarterly reports ended in 2024.** 四半期報告書 was abolished for periods from April 2024, so `edinet`'s `freq="quarterly"` serves the 半期報告書 that replaced it and labels it as half a year rather than implying a quarter. Quarterly detail is published as a 決算短信 through TDnet, which neither API carries — for quarterly granularity keep `yfinance` in the chain and accept that those columns are period-dated, not filing-dated.
 
 ### Current holdings
 

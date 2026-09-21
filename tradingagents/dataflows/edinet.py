@@ -33,6 +33,7 @@ Needs a free subscription key from https://api.edinet-fsa.go.jp (``EDINET_API_KE
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import json
@@ -46,7 +47,7 @@ from pathlib import Path
 import requests
 
 from .config import get_config
-from .errors import NoMarketDataError, VendorNotConfiguredError
+from .errors import NoMarketDataError, VendorNotConfiguredError, VendorRateLimitError
 from .symbol_utils import normalize_symbol
 from .utils import get_scrubbed, safe_ticker_component
 
@@ -129,11 +130,20 @@ _STATEMENTS: dict[str, list[tuple[str, tuple[str, ...], tuple[str, ...]]]] = {
 
 
 def get_api_key() -> str:
-    key = os.getenv("EDINET_API_KEY")
+    key = (os.getenv("EDINET_API_KEY") or "").strip()
     if not key:
         raise VendorNotConfiguredError(
             "EDINET_API_KEY is not set. Get a free subscription key at "
             "https://api.edinet-fsa.go.jp (アカウント作成 → APIキーの発行)."
+        )
+    if key.startswith("edb_"):
+        # EDINET DB is a third-party service with its own key format. Sending
+        # its key here returns a 401 inside a 200, which would otherwise read
+        # as "this company filed nothing" on every date.
+        raise VendorNotConfiguredError(
+            "EDINET_API_KEY holds an EDINET DB key (the 'edb_' prefix), which "
+            "金融庁's own API does not accept. Use the 'edinetdb' vendor for "
+            "that key, or get a free official key at https://api.edinet-fsa.go.jp."
         )
     return key
 
@@ -158,6 +168,29 @@ def _cache_dir() -> Path:
     return path
 
 
+def _raise_for_body_status(payload: dict, context: str) -> None:
+    """EDINET reports failures inside a 200 response; turn those into errors.
+
+    A rejected key comes back as ``HTTP 200`` with ``{"StatusCode": 401, ...}``
+    in the body, so ``raise_for_status`` never fires and the empty ``results``
+    reads as a quiet day with no filings. Left alone, a whole backtest would
+    report every Japanese company as having filed nothing (#1364).
+    """
+    status = payload.get("StatusCode") or (payload.get("metadata") or {}).get("status")
+    if status in (None, 200, "200"):
+        return
+    message = payload.get("message") or (payload.get("metadata") or {}).get("message") or ""
+    if str(status) == "401":
+        raise VendorNotConfiguredError(
+            f"EDINET rejected the subscription key ({message.strip()}). Keys are "
+            f"issued at https://api.edinet-fsa.go.jp and are 32 hex characters; "
+            f"a key from a third-party EDINET mirror will not work here."
+        )
+    if str(status) == "404":
+        return  # No file for this date; the caller reads that as an empty day.
+    raise VendorRateLimitError(f"EDINET returned status {status} for {context}: {message.strip()}")
+
+
 def _fetch_day(day: str) -> list[dict]:
     """Every listed-company filing on one file date, reduced to what we use."""
     key = get_api_key()
@@ -172,6 +205,7 @@ def _fetch_day(day: str) -> list[dict]:
         # Outside the 10-year retention window, or a date EDINET has no file for.
         return []
     payload = response.json()
+    _raise_for_body_status(payload, f"the filing list for {day}")
 
     rows = []
     for entry in payload.get("results") or []:
@@ -273,6 +307,10 @@ def _document_csv(doc_id: str) -> list[dict]:
     try:
         archive = zipfile.ZipFile(io.BytesIO(response.content))
     except zipfile.BadZipFile as exc:
+        # A refusal arrives as a JSON body under a 200, exactly as it does for
+        # the filing list, so read it before calling this an unusable archive.
+        with contextlib.suppress(ValueError):
+            _raise_for_body_status(json.loads(response.content), f"document {doc_id}")
         raise NoMarketDataError(doc_id, doc_id, f"EDINET returned no CSV archive: {exc}") from exc
 
     names = [
